@@ -1,22 +1,24 @@
+# backend/app/agent/llm.py
+
+import json
 import logging
 from typing import Any
 
-from openai import OpenAI
+from groq import Groq
 
-from app.config import OPENAI_API_KEY
+from app.config import GROQ_API_KEY
 
 
 logger = logging.getLogger("sanji.agent.llm")
 
 
-client = OpenAI(
-    api_key=OPENAI_API_KEY,
+client = Groq(
+    api_key=GROQ_API_KEY,
     timeout=90.0,
-    max_retries=2,
 )
 
 
-MODEL = "gpt-5.6-luna"
+MODEL = "openai/gpt-oss-20b"
 
 
 SYSTEM_PROMPT = r'''
@@ -340,12 +342,107 @@ Respond like a capable professional AI assistant.
 '''
 
 
+def convert_tools_to_groq(
+    tools: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Convert SANJI's internal tool schema into
+    Groq Chat Completions function-tool format.
+    """
+
+    groq_tools = []
+
+    for tool in tools or []:
+
+        if tool.get("type") != "function":
+            continue
+
+        groq_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.get("name"),
+                    "description": tool.get(
+                        "description",
+                        "",
+                    ),
+                    "parameters": tool.get(
+                        "parameters",
+                        {
+                            "type": "object",
+                            "properties": {},
+                        },
+                    ),
+                },
+            }
+        )
+
+    return groq_tools
+
+
+def normalize_messages(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Convert SANJI messages into Groq-compatible
+    Chat Completions messages.
+    """
+
+    normalized = []
+
+    for message in messages or []:
+
+        role = message.get(
+            "role",
+            "user",
+        )
+
+        content = message.get(
+            "content",
+            "",
+        )
+
+        if role not in {
+            "system",
+            "user",
+            "assistant",
+            "tool",
+        }:
+            role = "user"
+
+        if content is None:
+            content = ""
+
+        item = {
+            "role": role,
+            "content": str(content),
+        }
+
+        if role == "tool":
+
+            if message.get("tool_call_id"):
+                item["tool_call_id"] = message[
+                    "tool_call_id"
+                ]
+
+        if role == "assistant":
+
+            if message.get("tool_calls"):
+                item["tool_calls"] = message[
+                    "tool_calls"
+                ]
+
+        normalized.append(item)
+
+    return normalized
+
+
 def ask_agent(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
 ) -> dict:
     """
-    Send the current conversation to the LLM.
+    Send the current conversation to Groq.
 
     Returns:
         {
@@ -357,34 +454,85 @@ def ask_agent(
     """
 
     try:
-        response = client.responses.create(
-            model=MODEL,
-            instructions=SYSTEM_PROMPT,
-            input=messages,
-            tools=tools,
+
+        groq_messages = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT,
+            }
+        ]
+
+        groq_messages.extend(
+            normalize_messages(messages)
+        )
+
+        groq_tools = convert_tools_to_groq(
+            tools
+        )
+
+        request_args = {
+            "model": MODEL,
+            "messages": groq_messages,
+            "temperature": 0.2,
+            "max_tokens": 4096,
+        }
+
+        if groq_tools:
+
+            request_args["tools"] = groq_tools
+            request_args["tool_choice"] = "auto"
+
+        response = client.chat.completions.create(
+            **request_args
+        )
+
+        choice = response.choices[0]
+        message = choice.message
+
+        text = (
+            message.content
+            or ""
         )
 
         tool_calls = []
 
-        for item in response.output:
-            if getattr(item, "type", None) == "function_call":
-                tool_calls.append(
-                    {
-                        "call_id": item.call_id,
-                        "name": item.name,
-                        "arguments": item.arguments,
-                    }
-                )
+        for tool_call in (
+            message.tool_calls
+            or []
+        ):
+
+            function = tool_call.function
+
+            arguments = (
+                function.arguments
+                or "{}"
+            )
+
+            try:
+                json.loads(arguments)
+            except Exception:
+                arguments = "{}"
+
+            tool_calls.append(
+                {
+                    "call_id": tool_call.id,
+                    "name": function.name,
+                    "arguments": arguments,
+                }
+            )
 
         return {
             "success": True,
-            "text": response.output_text or "",
+            "text": text,
             "tool_calls": tool_calls,
             "error": None,
         }
 
     except Exception as exc:
-        logger.exception("LLM request failed")
+
+        logger.exception(
+            "Groq LLM request failed"
+        )
 
         return {
             "success": False,

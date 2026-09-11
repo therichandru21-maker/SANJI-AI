@@ -1,84 +1,94 @@
+# backend/app/tools/research.py
+
 import logging
 from typing import Any
 
-from openai import OpenAI
+from groq import Groq
 
-from app.config import OPENAI_API_KEY
+from app.config import GROQ_API_KEY
 
 
 logger = logging.getLogger("sanji.tool.research")
 
 
-client = OpenAI(
-    api_key=OPENAI_API_KEY,
+client = Groq(
+    api_key=GROQ_API_KEY,
     timeout=90.0,
-    max_retries=2,
 )
 
 
-MODEL = "gpt-5.6-luna"
+MODEL = "groq/compound"
 
 
 def research(query: str) -> dict[str, Any]:
     """
-    Live web research tool.
+    Live web research tool using Groq Compound.
 
-    Uses OpenAI's built-in web search capability to find
-    current information from the internet.
+    Groq Compound provides server-side web search and
+    returns the final researched answer.
     """
 
     if not query or not query.strip():
+
         return {
             "success": False,
             "error": "Research query cannot be empty.",
         }
 
-
     query = query.strip()
 
-
     if len(query) > 2000:
+
         return {
             "success": False,
             "error": "Research query is too long.",
         }
 
-
     logger.info(
-        "Web research started | query=%s",
+        "Groq web research started | query=%s",
         query,
     )
 
-
     try:
 
-        response = client.responses.create(
+        response = client.chat.completions.create(
 
             model=MODEL,
 
-            tools=[
+            messages=[
                 {
-                    "type": "web_search",
+                    "role": "user",
+                    "content": (
+                        "Research the following topic using "
+                        "the web and provide an accurate, "
+                        "concise answer.\n\n"
+                        f"Research request:\n{query}\n\n"
+                        "Instructions:\n"
+                        "- Use current web information when relevant.\n"
+                        "- Prefer reliable sources.\n"
+                        "- Cross-check important facts when possible.\n"
+                        "- Clearly explain the findings.\n"
+                        "- Do not mention internal tool execution."
+                    ),
                 }
             ],
 
-            input=(
-                "Research the following topic using the web.\n\n"
-                f"User research request:\n{query}\n\n"
-                "Instructions:\n"
-                "- Prefer reliable and relevant sources.\n"
-                "- Prioritize recent information when the topic is time-sensitive.\n"
-                "- Cross-check important facts when possible.\n"
-                "- Give a concise factual summary.\n"
-                "- Do not mention internal tool execution.\n"
-            ),
+            compound_custom={
+                "tools": {
+                    "enabled_tools": [
+                        "web_search",
+                        "visit_website",
+                    ]
+                }
+            },
         )
 
+        message = response.choices[0].message
 
         result_text = (
-            response.output_text or ""
+            message.content
+            or ""
         ).strip()
-
 
         if not result_text:
 
@@ -86,33 +96,29 @@ def research(query: str) -> dict[str, Any]:
                 "success": False,
                 "query": query,
                 "error": (
-                    "The web research service returned "
-                    "no readable result."
+                    "The Groq web research service "
+                    "returned no readable result."
                 ),
             }
 
-
         logger.info(
-            "Web research completed | query=%s",
+            "Groq web research completed | query=%s",
             query,
         )
-
 
         return {
             "success": True,
             "query": query,
             "result": result_text,
-            "source": "Web Search",
+            "source": "Groq Web Search",
         }
-
 
     except Exception as exc:
 
         logger.exception(
-            "Web research failed | query=%s",
+            "Groq web research failed | query=%s",
             query,
         )
-
 
         return {
             "success": False,

@@ -1,3 +1,5 @@
+# backend/app/config.py
+
 import os
 
 from dotenv import load_dotenv
@@ -7,10 +9,10 @@ load_dotenv()
 
 
 # ============================================================
-# OPENAI
+# GROQ
 # ============================================================
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 # ============================================================
@@ -33,9 +35,9 @@ JWT_SECRET = os.getenv("JWT_SECRET")
 # VALIDATION
 # ============================================================
 
-if not OPENAI_API_KEY:
+if not GROQ_API_KEY:
     raise ValueError(
-        "OPENAI_API_KEY is not configured."
+        "GROQ_API_KEY is not configured."
     )
 
 
