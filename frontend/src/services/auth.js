@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = "https://sanji-ai-g2um.onrender.com";
 
 export const loginWithGoogle = async (credential) => {
   if (!credential) {
